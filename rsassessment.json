@@ -6,6 +6,44 @@
     "variables": {},
     "resources": [
         {
+            "type": "Microsoft.Network/networkSecurityGroups",
+            "apiVersion": "2020-11-01",
+            "name": "Web_subnet_NSG",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "securityRules": [
+                    {
+                        "name": "allowHTTP",
+                        "properties": {
+                            "description": "Allow HTTP 80 to Public Load Balancer.",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "80",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 500,
+                            "direction": "Inbound"
+                        }
+                    },
+                    {
+                        "name": "allowSSH",
+                        "properties": {
+                            "description": "Allow SSH traffic to private VMSS instances.",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "22",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 600,
+                            "direction": "Inbound"
+                        }
+                    }
+                ]
+            }
+        },
+        {
             "type": "Microsoft.Network/virtualNetworks",
             "apiVersion": "2020-11-01",
             "name": "Onica_Virtual_Network",
@@ -20,7 +58,10 @@
                     {                        
                         "name": "Web_subnet_1",
                         "properties": {
-                            "addressPrefix": "10.50.10.0/24"
+                            "addressPrefix": "10.50.10.0/24",
+                            "networkSecurityGroup": {
+                                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', 'Web_subnet_NSG')]"
+                            }
                         }
                     },
                     {
@@ -30,7 +71,10 @@
                         }
                     }
                 ]
-            }
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/networkSecurityGroups', 'Web_subnet_NSG')]"
+            ]
         },
         {
             "type": "Microsoft.Network/publicIPAddresses",
@@ -50,7 +94,7 @@
             "name": "Web_Bastion",
             "location": "[resourceGroup().location]",
             "dependsOn": [
-                "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'Onica_Virtual_Network', 'AzureBastionSubnet')]",
+                "[resourceId('Microsoft.Network/virtualNetworks', 'Onica_Virtual_Network')]",
                 "[resourceId('Microsoft.Network/publicIPAddresses', 'Bastion-pip')]"
             ],
             "properties": {
@@ -95,7 +139,57 @@
             },
             "dependsOn": [
                 "[resourceId('Microsoft.Network/publicIPAddresses', 'Web-lb-pip')]"
-            ]
+            ],
+            "properties": {
+                "frontendIPConfigurations": [
+                    {
+                        "name": "Web_lb_frontEnd",
+                        "properties": {
+                            "publicIPAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIPAddresses', 'Web-lb-pip')]"
+                            }
+                        }
+                    }
+                ],
+                "backendAddressPools": [
+                    {
+                        "name": "Web_lb_backEnd"
+                    }
+                ],
+                "probes": [
+                    {
+                        "name": "httpProbe",
+                        "properties": {
+                            "protocol": "Tcp",
+                            "port": 80,
+                            "intervalInSeconds": 5,
+                            "numberOfProbes": 2
+                        }
+                    }
+                ],
+                "loadBalancingRules": [
+                    {
+                        "name": "Web_lb_Rule",
+                        "properties": {
+                            "frontendIPConfiguration": {
+                                "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', 'Web_lb', 'Web_lb_frontEnd')]"
+                            },
+                            "backendAddressPool": {
+                                "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'Web_lb', 'Web_lb_backEnd')]"
+                            },
+                            "protocol": "Tcp",
+                            "frontendPort": 80,
+                            "backendPort": 80,
+                            "enableFloatingIP": false,
+                            "idleTimeoutInMinutes": 5,
+                            "probe": {
+                                "id": "[resourceId('Microsoft.Network/loadBalancers/probes', 'Web_lb', 'httpProbe')]"
+                            },
+                            "disableOutboundSnat": true
+                        }
+                    }
+                ]
+            }
         }
 
     ],
