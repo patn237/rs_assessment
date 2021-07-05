@@ -12,7 +12,4 @@ sudo rm /var/www/html/index.html && \
 sudo mv index.php /var/www/html/ && \
 sudo rm /etc/apache2/mods-available/dir.conf && \
 sudo mv dir.conf /etc/apache2/mods-available/ && \
-sudo ufw allow 22 && \
-sudo ufw allow 80 && \
-sudo ufw enable
 #END
