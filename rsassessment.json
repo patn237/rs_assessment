@@ -188,6 +188,25 @@
                             "disableOutboundSnat": true
                         }
                     }
+                ],
+                 "outboundRules": [
+                    {
+                        "name": "Web_outbound_rule",
+                        "properties": {
+                            "allocatedOutboundPorts": 10000,
+                            "protocol": "All",
+                            "enableTcpReset": false,
+                            "idleTimeoutInMinutes": 15,
+                            "backendAddressPool": {
+                                "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'Web_lb', 'Web_lb_backEnd')]"
+                            },
+                            "frontendIPConfigurations": [
+                                {
+                                    "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', 'Web_lb', 'Web_lb_frontEnd')]"
+                                }
+                            ]
+                        }
+                    }
                 ]
             }
         }
