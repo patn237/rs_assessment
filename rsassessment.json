@@ -1,7 +1,26 @@
 {
     "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
     "contentVersion": "1.0.0.0",
-    "parameters": {},
+    "parameters": {
+        "adminUsername": {
+            "type": "string",
+            "metadata": {
+                "description": "Admin username on all VMs."
+            }
+        },
+        "adminPassword": {
+            "type": "securestring",
+            "metadata": {
+                "description": "Admin password on all VMs."
+            }
+        },
+        "Custom_Data": {
+            "type": "string",
+            "metadata": {
+                "description": "Add your custom Cloud Init code here."
+            }
+        }
+    },
     "functions": [],
     "variables": {},
     "resources": [
@@ -123,10 +142,7 @@
             },
             "properties": {
                 "publicIPAllocationMethod": "Static"
-            },
-            "zones": [
-                "1", "2", "3"
-            ]
+            }
         },
         {
             "type": "Microsoft.Network/loadBalancers",
@@ -154,6 +170,20 @@
                 "backendAddressPools": [
                     {
                         "name": "Web_lb_backEnd"
+                    }
+                ],
+                "inboundNatPools": [
+                    {
+                        "name": "natpool",
+                        "properties": {
+                            "frontendIPConfiguration": {
+                                "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', 'Web_lb', 'Web_lb_frontEnd')]"
+                            },
+                            "protocol": "tcp",
+                            "frontendPortRangeStart": 50000,
+                            "frontendPortRangeEnd": 50119,
+                            "backendPort": 22
+                        }
                     }
                 ],
                 "probes": [
@@ -193,7 +223,7 @@
                     {
                         "name": "Web_outbound_rule",
                         "properties": {
-                            "allocatedOutboundPorts": 10000,
+                            "allocatedOutboundPorts": 2000,
                             "protocol": "All",
                             "enableTcpReset": false,
                             "idleTimeoutInMinutes": 15,
@@ -209,8 +239,162 @@
                     }
                 ]
             }
-        }
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachineScaleSets",
+            "apiVersion": "2020-12-01",
+            "location": "[resourceGroup().location]",
+            "name": "Onica-VMSS",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', 'Onica_Virtual_Network')]",
+                "[resourceId('Microsoft.Network/loadBalancers', 'Web_lb')]"
+            ],
+            "zones": [
+                "1", "2", "3"
+            ],
+            "sku": {
+                "name": "Standard_D2as_v4",
+                "tier": "Standard",
+                "capacity": 3
+            },
+            "properties": {
+                "singlePlacementGroup": false,
+                "virtualMachineProfile": {
+                    "storageProfile": {
+                        "osDisk": {
+                            "createOption": "FromImage",
+                            "caching": "ReadWrite",
+                            "managedDisk": {
+                                "storageAccountType": "StandardSSD_LRS"
+                            }
+                        },
+                        "imageReference": {
+                            "publisher": "Canonical",
+                            "offer": "UbuntuServer",
+                            "sku": "18.04-LTS",
+                            "version": "latest"
+                        }
+                    },
+                    "osProfile": {
+                        "computerNamePrefix": "Web-",
+                        "adminUsername": "[parameters('adminUsername')]",
+                        "adminPassword": "[parameters('adminPassword')]",
+                        "customData": "[base64(parameters('Custom_Data'))]"
+                    },
+                    "networkProfile": {
+                        "networkInterfaceConfigurations": [
+                            {
+                                "name": "Web-Server-nic",
+                                "properties": {
+                                    "primary": true,
+                                    "enableAcceleratedNetworking": false,
+                                    "ipConfigurations": [
+                                        {
+                                            "name": "Web-Servers-ipconfig",
+                                            "properties": {
+                                                "subnet": {
+                                                    "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'Onica_Virtual_Network', 'Web_subnet_1')]"
+                                                },
+                                                "loadBalancerBackendAddressPools": [
+                                                    {
+                                                        "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', 'Web_lb', 'Web_lb_backEnd')]"
+                                                    }
+                                                ]
+                                            }
+                                        }
+                                    ]
 
+                                }
+                            }
+                        ],
+                        "healthProbe": {
+                            "id": "[resourceId('Microsoft.Network/loadBalancers/probes', 'Web_lb', 'httpProbe')]"
+                        }
+                    }
+                },
+                "orchestrationMode": "Uniform",
+                "scaleInPolicy": {
+                    "rules": [
+                        "Default"
+                    ]
+                },
+                "overprovision": true,
+                "upgradePolicy": {
+                    "mode": "Automatic"
+                },
+                "automaticRepairsPolicy": {
+                    "enabled": true,
+                    "gracePeriod": "PT10M"
+                },
+                "platformFaultDomainCount": 1,
+                "zoneBalance": false
+            }
+            
+        },
+        {
+            "type": "Microsoft.Insights/autoscalesettings",
+            "apiVersion": "2015-04-01",
+            "name": "Onica-VMSS-autoscale",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Compute/virtualMachineScaleSets', 'Onica-VMSS')]"
+            ],
+            "properties": {
+                "name": "Onica-VMSS-autoscale",
+                "targetResourceUri": "[resourceId('Microsoft.Compute/virtualMachineScaleSets', 'Onica-VMSS')]",
+                "enabled": true,
+                "profiles": [
+                    {
+                        "name": "Profile1",
+                        "capacity": {
+                            "minimum": "3",
+                            "maximum": "10",
+                            "default": "3"
+                        },
+                        "rules": [
+                            {
+                                "metricTrigger": {
+                                    "metricName": "Percentage CPU",
+                                    "metricNamespace": "",
+                                    "metricResourceUri": "[resourceId('Microsoft.Compute/virtualMachineScaleSets', 'Onica-VMSS')]",
+                                    "timeGrain": "PT1M",
+                                    "statistic": "Average",
+                                    "timeWindow": "PT5M",
+                                    "timeAggregation": "Maximum",
+                                    "operator": "GreaterThan",
+                                    "threshold": 80
+                                },
+                                "scaleAction": {
+                                    "direction": "Increase",
+                                    "type": "ChangeCount",
+                                    "value": "1",
+                                    "cooldown": "PT1M"
+                                }
+                            },
+                            {
+                                "metricTrigger": {
+                                    "metricName": "Percentage CPU",
+                                    "metricNamespace": "",
+                                    "metricResourceUri": "[resourceId('Microsoft.Compute/virtualMachineScaleSets', 'Onica-VMSS')]",
+                                    "timeGrain": "PT1M",
+                                    "statistic": "Average",
+                                    "timeWindow": "PT5M",
+                                    "timeAggregation": "Maximum",
+                                    "operator": "LessThanOrEqual",
+                                    "threshold": 20
+                                },
+                                "scaleAction": {
+                                    "direction": "Decrease",
+                                    "type": "ChangeCount",
+                                    "value": "1",
+                                    "cooldown": "PT1M"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
     ],
     "outputs": {}
 }
